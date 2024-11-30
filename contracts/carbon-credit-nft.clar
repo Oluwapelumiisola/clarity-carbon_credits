@@ -141,6 +141,12 @@
     (map-set credit-uri credit-id new-uri)
     (ok true)))
 
+;; Check if a carbon credit has been minted before (exists)
+(define-public (does-credit-exist (credit-id uint))
+  (if (is-some (map-get? credit-uri credit-id))
+      (ok true)
+      (err err-token-not-found)))
+
 ;; -----------------------------------------------------------
 ;; Read-Only Functions
 ;; -----------------------------------------------------------
@@ -192,3 +198,31 @@
     owner: (unwrap-panic (get-credit-owner id)),
     burned: (unwrap-panic (is-credit-burned-status id))
   })
+
+;; Helper to list tokens
+(define-private (list-tokens (start uint) (count uint))
+  (map +
+    (list start)
+    (generate-sequence count)))
+
+;; Check if a carbon credit token exists (i.e., has been minted before)
+(define-read-only (is-token-minted (credit-id uint))
+  (ok (is-some (map-get? credit-uri credit-id))))
+
+;; Check if a carbon credit exists and is not burned
+(define-read-only (is-credit-exists-and-valid (credit-id uint))
+  (let ((owner (nft-get-owner? carbon-credit credit-id)))
+    (if (is-some owner)
+        (ok (not (is-credit-burned credit-id)))
+        (err err-token-not-found))))
+
+;; Check if the caller is the contract owner
+(define-read-only (is-caller-owner)
+  (ok (is-eq tx-sender contract-owner)))
+
+;; -----------------------------------------------------------
+;; Contract Initialization
+;; -----------------------------------------------------------
+(begin
+  (var-set last-credit-id u0)) ;; Initialize the last credit ID
+
