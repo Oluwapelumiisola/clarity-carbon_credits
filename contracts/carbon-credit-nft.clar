@@ -53,6 +53,7 @@
 (define-private (is-credit-owner (credit-id uint) (sender principal))
   (is-eq sender (unwrap! (nft-get-owner? carbon-credit credit-id) false)))
 
+
 ;; Validate the format and length of a credit URI
 (define-private (is-valid-credit-uri (uri (string-ascii 256)))
   (let ((uri-length (len uri)))
@@ -81,6 +82,25 @@
 ;; Generate a sequence for batch operations
 (define-private (generate-sequence (length uint))
   (map - (list length)))
+
+(define-private (uint-to-uri (id uint))
+  (let ((uri (unwrap-panic (map-get? credit-uri id))))
+    {
+      credit-id: id,
+      uri: uri
+    }))
+
+(define-private (uint-to-status (id uint))
+{
+  credit-id: id,
+  burned: (unwrap-panic (is-credit-burned-status id))
+})
+
+(define-private (uint-to-burn-status (id uint))
+  {
+    credit-id: id,
+    burned: (unwrap-panic (is-credit-burned-status id))
+  })
 
 ;; -----------------------------------------------------------
 ;; Public Functions
@@ -155,6 +175,12 @@
 (define-read-only (get-credit-uri (credit-id uint))
   (ok (map-get? credit-uri credit-id)))
 
+(define-read-only (is-token-exists-valid (credit-id uint))
+(let ((owner (nft-get-owner? carbon-credit credit-id)))
+  (if (is-some owner)
+      (ok (not (is-credit-burned credit-id)))
+      (err err-token-not-found))))
+
 ;; Fetch the owner of a carbon credit
 (define-read-only (get-credit-owner (credit-id uint))
   (ok (nft-get-owner? carbon-credit credit-id)))
@@ -199,6 +225,13 @@
     burned: (unwrap-panic (is-credit-burned-status id))
   })
 
+(define-private (uint-to-owner (id uint))
+(let ((owner (unwrap-panic (nft-get-owner? carbon-credit id))))
+  {
+    credit-id: id,
+    owner: owner
+  }))
+
 ;; Helper to list tokens
 (define-private (list-tokens (start uint) (count uint))
   (map +
@@ -220,9 +253,69 @@
 (define-read-only (is-caller-owner)
   (ok (is-eq tx-sender contract-owner)))
 
+;; Check if a given carbon credit is valid and owned by the caller
+(define-read-only (is-credit-valid-and-owned-by-caller (credit-id uint))
+  (let ((credit-owner (unwrap! (nft-get-owner? carbon-credit credit-id) err-token-not-found)))
+    (if (and (not (is-credit-burned credit-id))
+             (is-eq credit-owner tx-sender))
+        (ok true)
+        (ok false))))
+
+;; Fetch metadata for a batch of carbon credits by batch ID
+(define-read-only (get-batch-metadata-by-id (batch-id uint))
+  (ok (map-get? batch-metadata batch-id)))
+
+;; Fetch URI for the batch of carbon credits using batch ID
+(define-read-only (get-batch-uri (batch-id uint))
+  (ok (map-get? batch-metadata batch-id)))
+
+;; Fetch a list of minted credit IDs starting from a specific point
+(define-read-only (get-minted-credit-ids (start-id uint) (limit uint))
+  (ok (map uint-to-response (list-tokens start-id limit))))
+
+;; Fetch total minted credits
+(define-read-only (get-total-minted-credits)
+  (ok (var-get last-credit-id)))
+
+(define-read-only (get-all-burn-status)
+  (ok (map uint-to-burn-status (generate-sequence (var-get last-credit-id)))))
+
+;; Check if the carbon credit has metadata
+(define-read-only (has-credit-metadata? (credit-id uint))
+  (ok (is-some (map-get? batch-metadata credit-id))))
+
+;; Fetch all burned credits
+(define-read-only (get-all-burned-credits)
+  (ok (map uint-to-burn-status (generate-sequence (var-get last-credit-id)))))
+
+
+(define-read-only (get-all-credit-uris)
+  (let ((total-credits (var-get last-credit-id)))
+    (ok (map uint-to-uri (generate-sequence total-credits)))))
+
+(define-read-only (get-all-credit-status)
+(let ((total-credits (var-get last-credit-id)))
+  (ok (map uint-to-status (generate-sequence total-credits)))))
+
+(define-read-only (has-metadata? (credit-id uint))
+(ok (is-some (map-get? batch-metadata credit-id))))
+
+(define-read-only (get-credit-metadata-by-id (credit-id uint))
+(ok (map-get? batch-metadata credit-id)))
+
+(define-read-only (get-credit-uri-by-id (credit-id uint))
+(ok (map-get? credit-uri credit-id)))
+
+(define-read-only (get-all-credit-owners)
+(let ((total-credits (var-get last-credit-id)))
+  (ok (map uint-to-owner (generate-sequence total-credits)))))
+
+;; Fetch metadata for a specific batch of credits
+(define-read-only (get-batch-metadata (batch-id uint))
+  (ok (map-get? batch-metadata batch-id)))
+
 ;; -----------------------------------------------------------
 ;; Contract Initialization
 ;; -----------------------------------------------------------
 (begin
   (var-set last-credit-id u0)) ;; Initialize the last credit ID
-
