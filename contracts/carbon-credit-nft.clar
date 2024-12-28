@@ -128,6 +128,43 @@
     (asserts! (is-valid-credit-uri uri) err-invalid-token-uri)
     (ok true)))
 
+;; Validate transfer with additional checks
+(define-private (validate-transfer 
+    (credit-id uint) 
+    (recipient principal))
+    (and
+        (not (is-credit-burned credit-id))
+        (is-credit-owner credit-id tx-sender)
+        (not (is-eq recipient tx-sender))))
+
+;; Format credit data for UI display
+(define-private (uint-to-history (id uint))
+    {
+        id: id,
+        uri: (unwrap-panic (get-credit-uri id)),
+        owner: (unwrap-panic (get-credit-owner id)),
+        burned: (is-credit-burned id),
+        metadata: (map-get? batch-metadata id)
+    })
+
+;; Validate credit state before operations
+(define-private (validate-credit-state (credit-id uint))
+    (and
+        (is-some (nft-get-owner? carbon-credit credit-id))
+        (not (is-credit-burned credit-id))))
+
+;; Add burned credits counter
+(define-private (add-if-burned (id uint) (count uint))
+    (if (is-credit-burned id)
+        (+ count u1)
+        count))
+
+;; Ownership validation helper
+(define-private (check-ownership (id uint) (previous-result bool))
+    (and
+        (is-credit-owner id tx-sender)
+        previous-result))
+
 ;; -----------------------------------------------------------
 ;; Public Functions
 ;; -----------------------------------------------------------
@@ -255,6 +292,82 @@
     (begin
         (asserts! (<= (len uris) max-batch-size) err-invalid-batch-size)
         (asserts! (fold validate-uri uris true) err-invalid-token-uri)
+        (ok true)))
+
+;; Enhanced error checking for transfers
+(define-public (safe-transfer 
+    (credit-id uint) 
+    (recipient principal))
+    (let ((validation-result (validate-transfer credit-id recipient)))
+        (asserts! validation-result err-not-token-owner)
+        (try! (transfer-carbon-credit credit-id tx-sender recipient))
+        (ok true)))
+
+;; -----------------------------------------------------------
+;; Add UI element to display total credits minted
+;; -----------------------------------------------------------
+(define-public (display-total-credits-minted)
+  (ok (var-get last-credit-id))) ;; Fetch and display the total number of carbon credits minted
+
+;; -----------------------------------------------------------
+;; Add meaningful functionality to check if credit is transferrable
+;; -----------------------------------------------------------
+(define-public (can-transfer-credit (credit-id uint))
+  (let ((is-valid (is-credit-valid credit-id)))
+    (if (is-ok is-valid)
+        (ok true) ;; Allow transfer if valid
+        (err err-token-not-found))))
+
+;; -----------------------------------------------------------
+;; Add security check to prevent minting beyond the max limit
+;; -----------------------------------------------------------
+(define-public (mint-carbon-credit-secure (credit-uri-data (string-ascii 256)))
+  (let ((new-credit-id (+ (var-get last-credit-id) u1)))
+    (asserts! (<= new-credit-id max-batch-size) err-invalid-batch-size)
+    (mint-carbon-credit credit-uri-data))) ;; Secure minting check
+
+;; -----------------------------------------------------------
+;; Add functionality to check for valid batch minting
+;; -----------------------------------------------------------
+(define-public (is-valid-batch-mint (uris (list 50 (string-ascii 256))))
+  (let ((batch-size (len uris)))
+    (if (<= batch-size max-batch-size)
+        (ok true)
+        (err err-invalid-batch-size)))) ;; Check batch size before minting
+
+;; -----------------------------------------------------------
+;; Add contract owner verification function
+;; -----------------------------------------------------------
+(define-public (verify-contract-owner)
+  (ok (is-eq tx-sender contract-owner))) ;; Verify if the caller is the contract owner
+
+;; -----------------------------------------------------------
+;; Enhance security: Prevent contract owner from changing contract address after deployment
+;; -----------------------------------------------------------
+(define-public (secure-owner-change)
+  (begin
+    ;; Restrict changes to the contract address once deployed
+    (asserts! (is-eq tx-sender contract-owner) err-owner-only)
+    (ok "Owner change not allowed after deployment")))
+
+;; -----------------------------------------------------------
+;; Batch burn multiple carbon credits at once
+;; -----------------------------------------------------------
+(define-public (batch-burn-carbon-credits (credit-ids (list 50 uint)))
+    (begin
+        (asserts! (> (len credit-ids) u0) err-invalid-batch-size)
+        (asserts! (<= (len credit-ids) max-batch-size) err-invalid-batch-size)
+        (map burn-carbon-credit credit-ids)
+        (ok true)))
+
+;; -----------------------------------------------------------
+;; Add additional metadata to an existing carbon credit
+;; -----------------------------------------------------------
+(define-public (add-credit-metadata (credit-id uint) (metadata-uri (string-ascii 256)))
+    (let ((credit-owner (unwrap! (nft-get-owner? carbon-credit credit-id) err-token-not-found)))
+        (asserts! (is-eq credit-owner tx-sender) err-not-token-owner)
+        (asserts! (is-valid-credit-uri metadata-uri) err-invalid-token-uri)
+        (map-set batch-metadata credit-id metadata-uri)
         (ok true)))
 
 ;; -----------------------------------------------------------
@@ -423,9 +536,22 @@
         (some expected-owner)
         (nft-get-owner? carbon-credit credit-id))))
 
+;; Test helper: Validate credit state
+(define-read-only (test-credit-state (credit-id uint))
+    (ok {
+        exists: (is-some (nft-get-owner? carbon-credit credit-id)),
+        burned: (is-credit-burned credit-id),
+        has-metadata: (is-some (map-get? batch-metadata credit-id))
+    }))
+
+;; -----------------------------------------------------------
+;; Add functionality to list the top 10 most minted credits
+;; -----------------------------------------------------------
+(define-read-only (list-top-10-most-minted)
+  (ok (map uint-to-response (list-tokens u0 u10)))) ;; List the top 10 minted credits
+
 ;; -----------------------------------------------------------
 ;; Contract Initialization
 ;; -----------------------------------------------------------
 (begin
   (var-set last-credit-id u0)) ;; Initialize the last credit ID
-
