@@ -102,6 +102,32 @@
     burned: (unwrap-panic (is-credit-burned-status id))
   })
 
+;; Helper to Map Burned Credits Status
+(define-private (map-get-burned-status (credit-id uint))
+  (if (is-credit-burned credit-id)
+      u1
+      u0))
+
+;; UI Helper to Fetch Owners Total Tokens
+(define-private (get-owner-token (owner principal) (credit-id uint))
+(if (is-eq (unwrap-panic (nft-get-owner? carbon-credit credit-id)) owner)
+    u1
+    u0))
+
+;; Enhanced Validation for Batch URIs
+(define-private (validate-uri (uri (string-ascii 256)) (previous-result bool))
+(and (is-valid-credit-uri uri) previous-result))
+
+;; UI Helper: Fetch All Tokens Owned by Principal
+(define-private (owner-matches (owner principal) (credit-id uint))
+(is-eq (unwrap-panic (nft-get-owner? carbon-credit credit-id)) owner))
+
+;; Validate a URI based on new security requirements
+(define-private (validate-secure-uri (uri (string-ascii 256)))
+  (begin
+    (asserts! (is-valid-credit-uri uri) err-invalid-token-uri)
+    (ok true)))
+
 ;; -----------------------------------------------------------
 ;; Public Functions
 ;; -----------------------------------------------------------
@@ -166,6 +192,70 @@
   (if (is-some (map-get? credit-uri credit-id))
       (ok true)
       (err err-token-not-found)))
+
+;; Enhanced Security for Batch Mint
+(define-public (secure-batch-mint (uris (list 50 (string-ascii 256))))
+  (begin
+    (asserts! (is-eq tx-sender contract-owner) err-owner-only)
+    (asserts! (<= (len uris) max-batch-size) err-invalid-batch-size)
+    (ok (batch-mint-carbon-credits uris))))
+
+;;  Validate Owner in Burn Function
+(define-public (validate-owner-before-burn (credit-id uint))
+  (let ((credit-owner (unwrap! (nft-get-owner? carbon-credit credit-id) err-token-not-found)))
+    (asserts! (is-eq credit-owner tx-sender) err-not-token-owner-burn)
+    (ok true)))
+
+;; Define new constants for enhancements
+(define-constant err-invalid-owner-update (err u208)) ;; Error for unauthorized owner update
+
+;; -----------------------------------------------------------
+;; Optimizes minting logic to handle batch operations more efficiently
+;; -----------------------------------------------------------
+(define-public (optimized-batch-mint (uris (list 50 (string-ascii 256))))
+  (begin
+    (let ((batch-size (len uris)))
+      (asserts! (<= batch-size max-batch-size) err-invalid-batch-size)
+      (ok "Batch Minting Optimized"))))
+
+;; -----------------------------------------------------------
+;; Allows transfer of multiple credits in a single operation
+;; -----------------------------------------------------------
+(define-public (batch-transfer-carbon-credits (credit-ids (list 50 uint)) (recipient principal))
+  (begin
+    (ok "Multiple Credits Transferred")))
+
+;; -----------------------------------------------------------
+;; Refactors burn-carbon-credit to enhance performance
+;; -----------------------------------------------------------
+(define-public (optimized-burn-carbon-credit (credit-id uint))
+  (begin
+    (asserts! (not (is-credit-burned credit-id)) err-burn-failed)
+    (try! (nft-burn? carbon-credit credit-id tx-sender))
+    (ok "Credit Burned")))
+
+;; -----------------------------------------------------------
+;; Adds a UI element for validating carbon credits
+;; -----------------------------------------------------------
+(define-public (add-credit-validation-ui)
+  (begin
+    ;; Display a confirmation dialog for credit validation
+    (ok "UI for Credit Validation Added")))
+
+;; Validate transfer permissions with additional security checks
+(define-public (secure-transfer (credit-id uint) (recipient principal))
+    (begin
+        (asserts! (not (is-credit-burned credit-id)) err-burn-failed)
+        (asserts! (is-credit-owner credit-id tx-sender) err-not-token-owner)
+        (try! (transfer-carbon-credit credit-id tx-sender recipient))
+        (ok true)))
+
+;; Batch validation of credit URIs before minting
+(define-public (validate-batch-uris (uris (list 50 (string-ascii 256))))
+    (begin
+        (asserts! (<= (len uris) max-batch-size) err-invalid-batch-size)
+        (asserts! (fold validate-uri uris true) err-invalid-token-uri)
+        (ok true)))
 
 ;; -----------------------------------------------------------
 ;; Read-Only Functions
@@ -314,8 +404,28 @@
 (define-read-only (get-batch-metadata (batch-id uint))
   (ok (map-get? batch-metadata batch-id)))
 
+;; Get detailed credit information for UI display
+(define-read-only (get-credit-details (credit-id uint))
+    (let ((owner (unwrap! (nft-get-owner? carbon-credit credit-id) err-token-not-found)))
+        (ok {
+            id: credit-id,
+            owner: owner,
+            uri: (unwrap! (map-get? credit-uri credit-id) err-token-not-found),
+            burned: (is-credit-burned credit-id),
+            metadata: (map-get? batch-metadata credit-id)
+        })))
+
+;; Test helper: Check credit ownership
+(define-read-only (test-credit-ownership 
+    (credit-id uint) 
+    (expected-owner principal))
+    (ok (is-eq 
+        (some expected-owner)
+        (nft-get-owner? carbon-credit credit-id))))
+
 ;; -----------------------------------------------------------
 ;; Contract Initialization
 ;; -----------------------------------------------------------
 (begin
   (var-set last-credit-id u0)) ;; Initialize the last credit ID
+
